@@ -1,0 +1,11 @@
+streamlit>=1.38.0,<2.0
+opencv-python>=4.10.0,<5.0
+mediapipe==0.10.21
+pandas>=2.2.0,<3.0
+scikit-learn>=1.4.0,<2.0
+numpy>=1.26.0,<2.0
+matplotlib>=3.8.0,<4.0
+streamlit-webrtc
+av
+scipy>=1.14.0,<2.0
+h5py>=3.10.0,<4.0
