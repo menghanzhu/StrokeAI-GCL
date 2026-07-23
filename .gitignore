@@ -11,3 +11,9 @@ models/artifacts/
 .streamlit/secrets.toml
 
 external/
+
+data/speech/TORGO-database/
+data/speech/processed/
+*.parquet
+*.wav
+*.flac
