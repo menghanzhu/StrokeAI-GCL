@@ -69,9 +69,6 @@ def init_state() -> None:
         "speech_instruction_finished_at": None,
         "speech_countdown_started_at": None,
         "speech_countdown_last_number": None,
-        "speech_phase": "idle",
-        "speech_retry_ready_at": None,
-        "speech_countdown_duration": 4.6,
         "speech_attempts": 0,
         "speech_prompt": "Today is a beautiful day.",
         "voice_queue": [],
@@ -89,44 +86,12 @@ def init_state() -> None:
             st.session_state[key] = value
 
 
-AUDIO_PROCESSOR_VERSION = "2026-07-23-resampled-v2"
-
-
 def get_audio_processor() -> RealtimeAudioProcessor:
-    """Create a fresh processor whenever its implementation changes."""
-    stored_version = st.session_state.get(
-        "audio_processor_version"
-    )
-    processor = st.session_state.get(
-        "audio_processor"
-    )
-
-    should_recreate = (
-        processor is None
-        or stored_version != AUDIO_PROCESSOR_VERSION
-        or not isinstance(
-            processor,
-            RealtimeAudioProcessor,
-        )
-    )
-
-    if should_recreate:
-        if processor is not None:
-            try:
-                processor.reset()
-            except Exception:
-                logger.exception(
-                    "Could not reset the old audio processor."
-                )
-
-        st.session_state.audio_processor = (
-            RealtimeAudioProcessor(
-                recording_seconds=6.0,
-                minimum_recording_seconds=2.0,
-            )
-        )
-        st.session_state.audio_processor_version = (
-            AUDIO_PROCESSOR_VERSION
+    """Create and reuse the microphone processor for the current session."""
+    if "audio_processor" not in st.session_state:
+        st.session_state.audio_processor = RealtimeAudioProcessor(
+            recording_seconds=6.0,
+            minimum_recording_seconds=2.0,
         )
 
     return st.session_state.audio_processor
@@ -615,8 +580,6 @@ def retry_current_step() -> None:
         st.session_state.speech_instruction_finished_at = None
         st.session_state.speech_countdown_started_at = None
         st.session_state.speech_countdown_last_number = None
-        st.session_state.speech_phase = "idle"
-        st.session_state.speech_retry_ready_at = None
         st.session_state.speech_result = None
         st.session_state.speech_attempts += 1
 
@@ -647,8 +610,6 @@ def skip_current_step() -> None:
         st.session_state.speech_step_initialized = False
         st.session_state.speech_prompt_started_at = None
         st.session_state.speech_recording_ready_at = None
-        st.session_state.speech_phase = "idle"
-        st.session_state.speech_retry_ready_at = None
         st.session_state.speech_result = None
 
     speak_message(
@@ -707,8 +668,6 @@ def reset_check() -> None:
     st.session_state.speech_instruction_finished_at = None
     st.session_state.speech_countdown_started_at = None
     st.session_state.speech_countdown_last_number = None
-    st.session_state.speech_phase = "idle"
-    st.session_state.speech_retry_ready_at = None
     st.session_state.speech_attempts = 0
     st.session_state.voice_queue = []
     st.session_state.voice_active_token = None
@@ -718,23 +677,9 @@ def reset_check() -> None:
     st.session_state.step_advance_ready_at = None
     st.session_state.webrtc_desired_playing_state = None
 
-    processor = st.session_state.pop(
-        "audio_processor",
-        None,
-    )
-
+    processor = st.session_state.get("audio_processor")
     if processor is not None:
-        try:
-            processor.reset()
-        except Exception:
-            logger.exception(
-                "Could not reset the audio processor."
-            )
-
-    st.session_state.pop(
-        "audio_processor_version",
-        None,
-    )
+        processor.reset()
 
     reset_step_validation()
 
@@ -1027,7 +972,7 @@ def evaluate_speech_step(
     audio_processor: RealtimeAudioProcessor,
     media_is_playing: bool,
 ) -> None:
-    """Guide, count down, record, validate, and automatically retry."""
+    """Guide, count down, record, validate, and finish the speech check."""
     if (
         st.session_state.check_step != 5
         or st.session_state.step_completed
@@ -1036,153 +981,146 @@ def evaluate_speech_step(
         return
 
     current_time = time.time()
-    phase = str(st.session_state.get("speech_phase", "idle"))
 
-    # Wait for the retry message to finish, then begin a clean new attempt.
-    if phase == "retry_wait":
-        retry_ready_at = st.session_state.get(
-            "speech_retry_ready_at"
-        )
-
-        if not voice_manager_is_idle():
-            return
-
-        if retry_ready_at is None:
-            st.session_state.speech_retry_ready_at = (
-                current_time + 1.0
-            )
-            return
-
-        if current_time < float(retry_ready_at):
-            return
-
-        audio_processor.reset()
-        st.session_state.speech_result = None
-        st.session_state.speech_recording_started = False
-        st.session_state.speech_step_initialized = False
-        st.session_state.speech_prompt_started_at = None
-        st.session_state.speech_recording_ready_at = None
-        st.session_state.speech_countdown_started_at = None
-        st.session_state.speech_countdown_last_number = None
-        st.session_state.speech_retry_ready_at = None
-        st.session_state.speech_phase = "idle"
-        st.session_state.step_started_at = current_time
-        return
-
+    # Enter Step 5 and play the short instruction once.
     if not st.session_state.speech_step_initialized:
         audio_processor.reset()
+
         st.session_state.speech_result = None
         st.session_state.speech_recording_started = False
         st.session_state.speech_step_initialized = True
         st.session_state.speech_prompt_started_at = current_time
-        st.session_state.speech_recording_ready_at = None
+
+        st.session_state.speech_instruction_finished_at = (
+            current_time + 4.0
+        )
         st.session_state.speech_countdown_started_at = None
         st.session_state.speech_countdown_last_number = None
-        st.session_state.speech_retry_ready_at = None
-        st.session_state.speech_phase = "instruction"
+        st.session_state.speech_recording_ready_at = None
 
-        speak_message(
-            text=(
+        speak_once(
+            f"speech_instruction_{st.session_state.speech_attempts}",
+            (
                 "Please read the sentence shown on the screen. "
                 "Get ready to begin."
             ),
-            message_key=(
-                f"speech_instruction_"
-                f"{st.session_state.speech_attempts}"
-            ),
-            minimum_interval_seconds=3600.0,
         )
         return
 
-    if phase == "instruction":
-        if not voice_manager_is_idle():
-            return
+    # Wait until the instruction has finished.
+    instruction_finished_at = (
+        st.session_state.speech_instruction_finished_at
+    )
 
-        st.session_state.speech_phase = "countdown"
+    if (
+        instruction_finished_at is not None
+        and current_time < float(instruction_finished_at)
+    ):
+        return
+
+    # Begin one shared three-second countdown.
+    if st.session_state.speech_countdown_started_at is None:
         st.session_state.speech_countdown_started_at = current_time
-        st.session_state.speech_countdown_last_number = 3
-
-        speak_message(
-            text="Three. Two. One. Start.",
-            message_key=(
-                f"speech_countdown_"
-                f"{st.session_state.speech_attempts}"
-            ),
-            minimum_interval_seconds=3600.0,
-        )
+        st.session_state.speech_countdown_last_number = None
         return
 
-    if phase == "countdown":
-        if not voice_manager_is_idle():
-            return
+    countdown_elapsed = (
+        current_time
+        - float(st.session_state.speech_countdown_started_at)
+    )
 
-        if st.session_state.speech_recording_ready_at is None:
-            st.session_state.speech_recording_ready_at = (
-                current_time + 0.7
-            )
-            return
+    if countdown_elapsed < 1.0:
+        countdown_number = 3
+    elif countdown_elapsed < 2.0:
+        countdown_number = 2
+    elif countdown_elapsed < 3.0:
+        countdown_number = 1
+    else:
+        countdown_number = 0
 
-        if current_time < float(
-            st.session_state.speech_recording_ready_at
-        ):
-            return
+    last_number = st.session_state.speech_countdown_last_number
 
-        audio_processor.start_recording()
-        st.session_state.speech_recording_started = True
-        st.session_state.speech_phase = "recording"
-        return
+    if countdown_number != last_number:
+        st.session_state.speech_countdown_last_number = countdown_number
 
-    if phase in {"recording", "analysing"}:
-        if audio_processor.recording_active:
-            st.session_state.speech_phase = "recording"
-            return
-
-        if audio_processor.analysis_in_progress:
-            st.session_state.speech_phase = "analysing"
-            return
-
-        result = audio_processor.latest_result
-        error = audio_processor.latest_error
-
-        if result is None and not error:
-            return
-
-        if error:
-            st.session_state.speech_result = result
-            st.session_state.speech_recording_started = False
-            st.session_state.speech_attempts += 1
-            st.session_state.speech_phase = "retry_wait"
-            st.session_state.speech_retry_ready_at = None
-            st.session_state.step_started_at = current_time
-
+        if countdown_number > 0:
             speak_message(
-                text=(
-                    "We could not analyse that recording. "
-                    "Please check your microphone. "
-                    "We will try again."
-                ),
+                text=str(countdown_number),
                 message_key=(
-                    f"speech_error_"
-                    f"{st.session_state.speech_attempts}"
+                    f"speech_countdown_"
+                    f"{st.session_state.speech_attempts}_"
+                    f"{countdown_number}"
                 ),
-                minimum_interval_seconds=5.0,
+                minimum_interval_seconds=60.0,
             )
-            return
+        else:
+            speak_message(
+                text="Start.",
+                message_key=(
+                    f"speech_countdown_"
+                    f"{st.session_state.speech_attempts}_start"
+                ),
+                minimum_interval_seconds=60.0,
+            )
 
-        if not bool(result.get("valid_speech", False)):
+    # Wait until 3, 2, 1 have finished.
+    if countdown_number > 0:
+        return
+
+    # Give "Start" time to finish before recording.
+    if st.session_state.speech_recording_ready_at is None:
+        st.session_state.speech_recording_ready_at = current_time + 0.8
+        return
+
+    if current_time < float(
+        st.session_state.speech_recording_ready_at
+    ):
+        return
+
+    result = audio_processor.latest_result
+
+    if (
+        result is not None
+        and st.session_state.speech_recording_started
+    ):
+        st.session_state.speech_result = result
+
+        features = dict(result.get("features", {}) or {})
+
+        voiced_duration = float(
+            features.get("voiced_duration", 0.0) or 0.0
+        )
+        voiced_ratio = float(
+            features.get("voiced_ratio", 0.0) or 0.0
+        )
+        rms_mean = float(
+            features.get("rms_mean", 0.0) or 0.0
+        )
+
+        valid_spoken_sample = (
+            bool(result.get("speech_detected", False))
+            and voiced_duration >= 0.80
+            and voiced_ratio >= 0.10
+            and rms_mean >= 0.002
+        )
+
+        if not valid_spoken_sample:
             audio_processor.reset()
+
             st.session_state.speech_result = None
             st.session_state.speech_recording_started = False
+            st.session_state.speech_step_initialized = False
+            st.session_state.speech_prompt_started_at = None
+            st.session_state.speech_instruction_finished_at = None
+            st.session_state.speech_countdown_started_at = None
+            st.session_state.speech_countdown_last_number = None
+            st.session_state.speech_recording_ready_at = None
             st.session_state.speech_attempts += 1
-            st.session_state.speech_phase = "retry_wait"
-            st.session_state.speech_retry_ready_at = None
-            st.session_state.step_started_at = current_time
 
             speak_message(
                 text=(
-                    "We did not hear enough clear speech. "
-                    "Please move closer to the microphone. "
-                    "We will try again."
+                    "We did not hear the complete sentence. "
+                    "Please move closer to the microphone and try again."
                 ),
                 message_key=(
                     f"speech_retry_"
@@ -1192,28 +1130,42 @@ def evaluate_speech_step(
             )
             return
 
-        st.session_state.speech_result = result
-        score = float(result.get("difference_score", 0.0) or 0.0)
+        score = float(
+            result.get("difference_score", 0.0) or 0.0
+        )
 
         if score >= 75.0:
-            voice_message = "Thank you. Your speech check is complete."
+            voice_message = (
+                "Thank you. Your speech check is complete."
+            )
         elif score >= 45.0:
-            voice_message = "Thank you. Your speech check is complete."
+            voice_message = (
+                "Thank you. Your speech check is complete."
+            )
         else:
-            voice_message = "Well done. Your speech check is complete."
+            voice_message = (
+                "Well done. Your speech check is complete."
+            )
 
-        st.session_state.speech_phase = "complete"
         mark_step_complete(
             "Speech sample successfully recorded and analysed.",
             voice_message,
         )
 
+        return
 
+    if (
+        not audio_processor.recording_active
+        and not audio_processor.analysis_in_progress
+        and not st.session_state.speech_recording_started
+    ):
+        audio_processor.start_recording()
+        st.session_state.speech_recording_started = True
 def render_speech_status(
     audio_processor: RealtimeAudioProcessor,
     media_is_playing: bool,
 ) -> None:
-    """Render speech guidance, countdown, recording, and model output."""
+    """Render the automatic speech recording and synchronized countdown."""
     st.markdown(
         f"""
         <div class="speech-card">
@@ -1237,61 +1189,50 @@ def render_speech_status(
         )
         return
 
-    phase = str(st.session_state.get("speech_phase", "idle"))
+    countdown_started_at = st.session_state.get(
+        "speech_countdown_started_at"
+    )
+    instruction_finished_at = st.session_state.get(
+        "speech_instruction_finished_at"
+    )
     current_time = time.time()
 
-    if phase == "instruction":
-        st.info("Please listen to the short instruction.")
-
-    elif phase == "countdown":
-        countdown_started_at = st.session_state.get(
-            "speech_countdown_started_at"
-        )
-        countdown_duration = float(
-            st.session_state.get("speech_countdown_duration", 4.6)
-        )
-
-        if countdown_started_at is None:
-            displayed_text = "Get ready"
+    if (
+        st.session_state.get("speech_step_initialized")
+        and not st.session_state.speech_recording_started
+    ):
+        if (
+            instruction_finished_at is not None
+            and current_time < float(instruction_finished_at)
+        ):
+            st.info("Please listen to the short instruction.")
+        elif countdown_started_at is None:
+            st.info("The countdown will begin shortly.")
         else:
-            elapsed = max(
-                0.0,
-                current_time - float(countdown_started_at),
-            )
-            segment = countdown_duration / 4.0
-
-            if elapsed < segment:
-                displayed_text = "3"
-            elif elapsed < segment * 2:
-                displayed_text = "2"
-            elif elapsed < segment * 3:
-                displayed_text = "1"
+            elapsed = current_time - float(countdown_started_at)
+            if elapsed < 1.0:
+                displayed_number = 3
+            elif elapsed < 2.0:
+                displayed_number = 2
+            elif elapsed < 3.0:
+                displayed_number = 1
             else:
-                displayed_text = "Start"
+                displayed_number = 0
 
-        st.markdown(
-            f"""
-            <div class="completion-card">
-                <p>Recording begins in</p>
-                <div style="font-size: 88px; font-weight: 800;">
-                    {displayed_text}
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    elif phase == "recording":
-        st.warning("Recording now. Please read the sentence aloud.")
-
-    elif phase == "analysing":
-        st.info("Analysing your speech sample...")
-
-    elif phase == "retry_wait":
-        st.warning(
-            "No clear speech was detected. "
-            "A new countdown will begin automatically."
-        )
+            if displayed_number > 0:
+                st.markdown(
+                    f"""
+                    <div class="completion-card">
+                        <p>Recording begins in</p>
+                        <div style="font-size: 88px; font-weight: 800;">
+                            {displayed_number}
+                        </div>
+                    </div>
+                    """,
+                    unsafe_allow_html=True,
+                )
+            else:
+                st.success("Start speaking now.")
 
     duration = audio_processor.recorded_duration
     volume = audio_processor.current_volume
@@ -1303,6 +1244,7 @@ def render_speech_status(
         st.metric("Microphone level", f"{volume:.4f}")
 
     if audio_processor.recording_active:
+        st.warning("Recording now. Please read the sentence aloud.")
         st.progress(
             min(1.0, duration / audio_processor.recording_seconds),
             text=(
@@ -1312,6 +1254,8 @@ def render_speech_status(
         )
     elif audio_processor.analysis_in_progress:
         st.info("Analysing your speech sample...")
+    elif st.session_state.speech_recording_started:
+        st.info("Preparing your speech result...")
 
     error = audio_processor.latest_error
     if error:
@@ -1322,41 +1266,16 @@ def render_speech_status(
         or audio_processor.latest_result
     )
 
-
-    if result and not bool(result.get("valid_speech", True)):
-        st.warning("No valid speech was detected in this attempt.")
-        debug_col1, debug_col2, debug_col3 = st.columns(3)
-        with debug_col1:
-            st.metric(
-                "Voiced duration",
-                f"{float(result.get('voiced_duration', 0.0)):.2f}s",
-            )
-        with debug_col2:
-            st.metric(
-                "Average level",
-                f"{float(result.get('rms_mean', 0.0)):.5f}",
-            )
-        with debug_col3:
-            st.metric(
-                "Peak level",
-                f"{float(result.get('peak_amplitude', 0.0)):.5f}",
-            )
-
-    if result and bool(result.get("valid_speech", False)):
+    if result:
         score = float(result.get("difference_score", 0.0) or 0.0)
         result_column, score_column = st.columns(2)
-
         with result_column:
             st.metric(
                 "Speech result",
                 str(result.get("result_level", "Available")),
             )
-
         with score_column:
-            st.metric(
-                "Pattern difference score",
-                f"{score:.1f}%",
-            )
+            st.metric("Pattern difference score", f"{score:.1f}%")
 
         st.caption(
             str(
@@ -1368,25 +1287,30 @@ def render_speech_status(
         )
 
         with st.expander("Show speech timing details", expanded=False):
+            features = dict(result.get("features", {}) or {})
             st.write(
-                "Recorded duration:",
-                f"{float(result.get('recorded_duration', 0.0)):.2f}s",
+                "Total duration:",
+                f"{float(features.get('total_duration', 0.0)):.2f}s",
             )
             st.write(
                 "Voiced duration:",
-                f"{float(result.get('voiced_duration', 0.0)):.2f}s",
+                f"{float(features.get('voiced_duration', 0.0)):.2f}s",
             )
             st.write(
                 "Voiced ratio:",
-                f"{float(result.get('voiced_ratio', 0.0)):.2f}",
+                f"{float(features.get('voiced_ratio', 0.0)):.2f}",
             )
             st.write(
-                "Average level:",
-                f"{float(result.get('rms_mean', 0.0)):.4f}",
+                "Speech start delay:",
+                f"{float(features.get('speech_start_delay', 0.0)):.2f}s",
             )
             st.write(
-                "Peak level:",
-                f"{float(result.get('peak_amplitude', 0.0)):.4f}",
+                "Pause count:",
+                int(float(features.get("pause_count", 0.0))),
+            )
+            st.write(
+                "Longest pause:",
+                f"{float(features.get('longest_pause', 0.0)):.2f}s",
             )
 
 
@@ -2323,28 +2247,12 @@ def render_welcome_page() -> None:
             st.session_state.speech_instruction_finished_at = None
             st.session_state.speech_countdown_started_at = None
             st.session_state.speech_countdown_last_number = None
-            st.session_state.speech_phase = "idle"
-            st.session_state.speech_retry_ready_at = None
             st.session_state.speech_attempts = 0
             st.session_state.webrtc_desired_playing_state = None
 
-            processor = st.session_state.pop(
-                "audio_processor",
-                None,
-            )
-
+            processor = st.session_state.get("audio_processor")
             if processor is not None:
-                try:
-                    processor.reset()
-                except Exception:
-                    logger.exception(
-                        "Could not reset the audio processor."
-                    )
-
-            st.session_state.pop(
-                "audio_processor_version",
-                None,
-            )
+                processor.reset()
 
             reset_step_validation()
 
