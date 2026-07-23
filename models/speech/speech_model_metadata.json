@@ -1,0 +1,106 @@
+{
+  "model_name": "random_forest",
+  "training_row_count": 16552,
+  "feature_count": 44,
+  "feature_columns": [
+    "total_duration",
+    "voiced_duration",
+    "voiced_ratio",
+    "speech_start_delay",
+    "speech_end_silence",
+    "pause_count",
+    "mean_pause_duration",
+    "longest_pause",
+    "rms_mean",
+    "rms_std",
+    "zero_crossing_rate_mean",
+    "zero_crossing_rate_std",
+    "spectral_centroid_mean",
+    "spectral_centroid_std",
+    "spectral_bandwidth_mean",
+    "spectral_bandwidth_std",
+    "spectral_rolloff_mean",
+    "spectral_rolloff_std",
+    "mfcc_1_mean",
+    "mfcc_1_std",
+    "mfcc_2_mean",
+    "mfcc_2_std",
+    "mfcc_3_mean",
+    "mfcc_3_std",
+    "mfcc_4_mean",
+    "mfcc_4_std",
+    "mfcc_5_mean",
+    "mfcc_5_std",
+    "mfcc_6_mean",
+    "mfcc_6_std",
+    "mfcc_7_mean",
+    "mfcc_7_std",
+    "mfcc_8_mean",
+    "mfcc_8_std",
+    "mfcc_9_mean",
+    "mfcc_9_std",
+    "mfcc_10_mean",
+    "mfcc_10_std",
+    "mfcc_11_mean",
+    "mfcc_11_std",
+    "mfcc_12_mean",
+    "mfcc_12_std",
+    "mfcc_13_mean",
+    "mfcc_13_std"
+  ],
+  "test_size": 0.2,
+  "random_state": 42,
+  "label_mapping": {
+    "healthy": 0,
+    "dysarthria": 1
+  },
+  "selected_test_results": {
+    "accuracy": 0.959226819691936,
+    "precision": 0.9757281553398058,
+    "recall": 0.9013452914798207,
+    "f1": 0.9370629370629371,
+    "roc_auc": 0.9934695777892132,
+    "confusion_matrix": [
+      [
+        2171,
+        25
+      ],
+      [
+        110,
+        1005
+      ]
+    ],
+    "classification_report": {
+      "healthy": {
+        "precision": 0.9517755370451556,
+        "recall": 0.988615664845173,
+        "f1-score": 0.969845878936788,
+        "support": 2196.0
+      },
+      "dysarthria": {
+        "precision": 0.9757281553398058,
+        "recall": 0.9013452914798207,
+        "f1-score": 0.9370629370629371,
+        "support": 1115.0
+      },
+      "accuracy": 0.959226819691936,
+      "macro avg": {
+        "precision": 0.9637518461924808,
+        "recall": 0.9449804781624969,
+        "f1-score": 0.9534544079998626,
+        "support": 3311.0
+      },
+      "weighted avg": {
+        "precision": 0.9598417313666703,
+        "recall": 0.959226819691936,
+        "f1-score": 0.9588060178104383,
+        "support": 3311.0
+      }
+    }
+  },
+  "important_limitations": [
+    "The model distinguishes TORGO healthy and dysarthric speech patterns; it does not diagnose stroke.",
+    "The current dataset columns do not include speaker identifiers, so this is an utterance-level split. The same speaker may appear in both training and test data.",
+    "Reported performance may therefore be higher than performance on completely unseen speakers."
+  ]
+}
